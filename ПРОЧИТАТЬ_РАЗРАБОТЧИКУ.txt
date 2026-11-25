@@ -1,0 +1,81 @@
+ГОТОВЫЙ КОМПЛЕКТ ДЛЯ РАЗРАБОТЧИКА — 25.11.2026
+
+Бот: @nashasmena_b2b_login_bot
+Сайт B2B: https://b2b.n-smena.business
+Адрес API бота: https://bot.n-smena.business (точка после bot, не дефис)
+
+В комплекте настоящие сохранённые настройки, без заглушек:
+  .env                         BOT_DOMAIN, рядом с docker-compose.yml
+  bot/.env                     токен Telegram, BRIDGE_KEY и параметры контейнера
+  bot/                         весь исходный код, Dockerfile и тесты
+  docker-compose.yml           бот и Caddy, автоперезапуск и постоянный том
+  Caddyfile                    HTTPS для bot.n-smena.business
+  systemd/b2b-login-bot.service готовый unit для альтернативного запуска без Docker
+  systemd/b2b-login-bot.env     те же токен и ключ, с путями для systemd
+  systemd/Caddyfile            прокси для варианта systemd
+
+Архив содержит действующие секреты. Не публиковать и не добавлять в Git.
+Токен ранее сохранён владельцем; если его перевыпустили в BotFather, потребуется новый.
+Доступ к базе B2B и ключи amoCRM для сервера бота не нужны и сюда не включены.
+
+ВЫБРАННЫЙ СПОСОБ: DOCKER COMPOSE
+
+Используйте файлы из корня и каталога bot. Каталог systemd при Docker не применяется.
+Не запускайте Docker и systemd одновременно: допускается один процесс с этим токеном.
+Файлы .env скрытые: ls -la; в Finder Cmd+Shift+точка.
+Не копировать .env.example поверх заполненных файлов и не менять BRIDGE_KEY:
+соответствующий ключ уже сохранён владельцем для настройки B2B.
+
+1. Нужен публичный IP вашего нового сервера. Передайте его владельцу домена.
+   Владелец создаст A-запись bot.n-smena.business на этот IP.
+   Сейчас DNS ещё не настроен, IP не предоставлен. Один .env не создаёт DNS-запись.
+2. На сервере должны быть Docker Engine и Docker Compose, синхронизация времени,
+   свободные входящие TCP 80 и 443; исходящий HTTPS к api.telegram.org и b2b.n-smena.business.
+3. Распаковать весь комплект в одну папку. Из корня:
+   chmod 600 .env bot/.env
+   docker compose config --quiet
+   docker compose build
+   docker compose up -d
+   docker compose ps
+   docker compose logs --tail=30 bot
+   Не присылайте вывод docker compose config без --quiet: он раскрывает секреты.
+4. Caddy автоматически оформляет HTTPS после настройки DNS и доступности 80/443.
+   Если эти порты уже заняты панелью хостинга, используйте её HTTPS reverse proxy
+   к 127.0.0.1:3103 и запускайте только docker compose up -d bot; не запускайте Caddy параллельно.
+5. Проверить HTTPS, затем передать владельцу сообщение «бот развёрнут, HTTPS готов».
+   Владелец отдельно подключит мост в B2B и привяжет телефоны аккаунтов.
+   Без этого подтверждение контакта и выдача кодов входа ещё не заработают полностью.
+
+ПРОВЕРКА
+
+Обычное открытие https://bot.n-smena.business/ в браузере возвращает 404 — это нормально:
+веб-страницы у бота нет, адрес обслуживает только защищённый обмен с B2B.
+Для проверки подписи с Node.js 24+ в корне пакета:
+  BOT_ORIGIN=https://bot.n-smena.business node --env-file=bot/.env check-bridge.mjs
+Ожидается: Signed bridge health: OK
+Этот запрос не отправляет Telegram-сообщений.
+Бот работает через long polling. При наличии старого webhook или второго процесса
+он может отказать в запуске. Не сбрасывайте webhook чужой интеграции без согласования.
+
+АЛЬТЕРНАТИВА: SYSTEMD БЕЗ DOCKER
+
+Файл службы не является копией с чужого рабочего сервера: он подготовлен под эти точные пути.
+Нужен Node.js 24+ по /usr/bin/node. Проверьте: /usr/bin/node --version.
+Если Node установлен по другому пути, поправьте только ExecStart в unit.
+Создать системного пользователя b2bloginbot, каталог /opt/b2b-login-bot и постоянный
+каталог /var/lib/b2b-login-bot с владельцем b2bloginbot и правами 700.
+Скопировать bot/bot.mjs, protocol.mjs, telegram.mjs, package.json в /opt/b2b-login-bot/.
+Скопировать systemd/b2b-login-bot.env в /etc/b2b-login-bot.env с правами root:root 600.
+Скопировать systemd/b2b-login-bot.service в /etc/systemd/system/b2b-login-bot.service.
+  systemctl daemon-reload
+  systemctl enable --now b2b-login-bot
+  systemctl status b2b-login-bot
+Отдельно настроить установленный Caddy или HTTPS reverse proxy по systemd/Caddyfile.
+В этом варианте docker compose up не запускать.
+
+ГРАНИЦЫ ГОТОВНОСТИ
+
+Исходный код и совместимость с B2B проверены локально ранее. Этот комплект содержит
+те же модули бота, новые секреты не генерировались: использован уже подготовленный общий ключ.
+Новый хостинг нами не проверен; его IP, DNS, сертификат и запуск выполняются при установке.
+Изменять основной B2B, Пульс и их базы из этого комплекта не требуется.

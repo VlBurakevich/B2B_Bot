@@ -1,0 +1,9 @@
+bot.n-smena.business {
+    @bridge path /bridge/code /bridge/health
+    handle @bridge {
+        reverse_proxy 127.0.0.1:3103
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

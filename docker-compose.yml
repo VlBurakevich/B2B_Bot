@@ -1,0 +1,34 @@
+services:
+  bot:
+    build: ./bot
+    restart: unless-stopped
+    init: true
+    env_file: ./bot/.env
+    volumes:
+      - bot_state:/app/data
+    ports:
+      - "127.0.0.1:3103:3103"
+    stop_grace_period: 70s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      BOT_DOMAIN: ${BOT_DOMAIN:?Set BOT_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bot
+volumes:
+  bot_state:
+  caddy_data:
+  caddy_config:

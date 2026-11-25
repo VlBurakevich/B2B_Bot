@@ -1,0 +1,8 @@
+.env
+bot/.env
+systemd/*.env
+*.sqlite*
+*.key
+private/
+data/
+node_modules/

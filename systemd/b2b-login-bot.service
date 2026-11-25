@@ -1,0 +1,21 @@
+[Unit]
+Description=Nasha Smena B2B login bot
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=b2bloginbot
+Group=b2bloginbot
+WorkingDirectory=/opt/b2b-login-bot
+EnvironmentFile=/etc/b2b-login-bot.env
+ExecStart=/usr/bin/node /opt/b2b-login-bot/bot.mjs
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=70
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/b2b-login-bot
+UMask=0077
+[Install]
+WantedBy=multi-user.target

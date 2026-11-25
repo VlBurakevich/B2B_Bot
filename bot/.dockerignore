@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!bot.mjs
+!protocol.mjs
+!telegram.mjs
+!package.json

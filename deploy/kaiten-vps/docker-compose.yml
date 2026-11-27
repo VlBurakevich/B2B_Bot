@@ -1,0 +1,35 @@
+# Run on the existing Kaiten VPS, not on the bot host.
+name: kaiten-phone-candidate
+services:
+  kaiten:
+    build: ../../kaiten
+    restart: unless-stopped
+    env_file: ../../kaiten/.env
+    ports:
+      - "127.0.0.1:${KAITEN_CANDIDATE_PORT:-18088}:8080"
+    volumes:
+      - type: bind
+        source: ${KAITEN_DATA_DIR:?Set a separate prepared candidate data directory}
+        target: /data
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+  kaiten-notifications:
+    build: ../../kaiten
+    command: ["python", "telegram_worker.py"]
+    restart: unless-stopped
+    env_file: ../../kaiten/.env
+    volumes:
+      - type: bind
+        source: ${KAITEN_DATA_DIR:?Set a separate prepared candidate data directory}
+        target: /data
+        bind:
+          create_host_path: false
+    depends_on:
+      kaiten:
+        condition: service_healthy

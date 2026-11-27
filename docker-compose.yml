@@ -1,3 +1,4 @@
+name: ${COMPOSE_PROJECT_NAME:?Set the existing Compose project name in .env}
 services:
   bot:
     build: ./bot
@@ -30,5 +31,11 @@ services:
       - bot
 volumes:
   bot_state:
+    external: true
+    name: ${BOT_STATE_VOLUME:?Use the existing bot state volume}
   caddy_data:
+    external: true
+    name: ${CADDY_DATA_VOLUME:?Use the existing Caddy data volume}
   caddy_config:
+    external: true
+    name: ${CADDY_CONFIG_VOLUME:?Use the existing Caddy config volume}

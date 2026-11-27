@@ -1,9 +1,9 @@
 {$BOT_DOMAIN} {
-    @bridge path /bridge/code /bridge/health /bridge/notify
-    handle @bridge {
-        reverse_proxy bot:3103
-    }
-    handle {
-        respond "Not found" 404
-    }
+	@bridge path /bridge/code /bridge/health /bridge/notify /bridge/kaiten-test/code /bridge/kaiten-test/health /bridge/kaiten-test/notify
+	handle @bridge {
+		reverse_proxy bot:3103
+	}
+	handle {
+		respond "Not found" 404
+	}
 }

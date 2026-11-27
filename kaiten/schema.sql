@@ -1,0 +1,65 @@
+PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+ password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','employee')),
+ active INTEGER NOT NULL DEFAULT 1, telegram_chat TEXT, telegram_enabled INTEGER NOT NULL DEFAULT 1,
+ created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+ token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ csrf TEXT NOT NULL, expires INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS invites (
+ id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, login TEXT NOT NULL COLLATE NOCASE,
+ role TEXT NOT NULL CHECK(role IN ('admin','employee')), created_by TEXT NOT NULL REFERENCES users(id),
+ expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS projects (
+ id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+ color TEXT NOT NULL DEFAULT '#7274f5', owner_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_members (
+ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(project_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS tasks (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+ parent_id TEXT REFERENCES tasks(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+ priority TEXT NOT NULL DEFAULT 'backlog' CHECK(priority IN ('4','20','80','backlog')),
+ status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','doing','done')),
+ due_date TEXT, due_time TEXT, assignee_id TEXT NOT NULL REFERENCES users(id),
+ created_by TEXT NOT NULL REFERENCES users(id), position REAL NOT NULL DEFAULT 0,
+ version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_project ON tasks(project_id);
+CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_id);
+CREATE INDEX IF NOT EXISTS tasks_due ON tasks(due_date,status);
+CREATE TABLE IF NOT EXISTS task_members (
+ task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(task_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS comments (
+ id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comments_task ON comments(task_id);
+CREATE TABLE IF NOT EXISTS files (
+ id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, size INTEGER NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS files_task ON files(task_id);
+CREATE TABLE IF NOT EXISTS activity (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+ task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, user_id TEXT REFERENCES users(id),
+ text TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS telegram_codes (
+ token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outbox (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL REFERENCES users(id),
+ text TEXT NOT NULL, dedup TEXT UNIQUE, sent INTEGER NOT NULL DEFAULT 0,
+ attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);

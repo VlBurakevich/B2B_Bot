@@ -1,0 +1,12 @@
+.env*
+data
+uploads
+backups
+__pycache__
+tests
+.git
+.venv
+*.key
+*.sqlite*
+*.zip
+*.tar.gz

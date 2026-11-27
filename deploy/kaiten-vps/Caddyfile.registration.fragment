@@ -1,0 +1,11 @@
+# Replace ONLY the existing test-kaiten virtual host with this transitional block.
+# This file is for the HOST Caddy, not the container on the bot server.
+test-kaiten.n-smena.business {
+	encode zstd gzip
+	handle /api/telegram-bridge/message {
+		reverse_proxy 127.0.0.1:18088
+	}
+	handle {
+		respond "Kaiten: выполняется обновление. Попробуйте позже." 503
+	}
+}

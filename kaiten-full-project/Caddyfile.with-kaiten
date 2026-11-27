@@ -1,0 +1,14 @@
+# One-host variant; enable only after data migration and DNS cutover are planned.
+{$BOT_DOMAIN} {
+	@bridge path /bridge/code /bridge/health /bridge/notify /bridge/kaiten-test/code /bridge/kaiten-test/health /bridge/kaiten-test/notify
+	handle @bridge {
+		reverse_proxy bot:3103
+	}
+	handle {
+		respond "Not found" 404
+	}
+}
+{$KAITEN_TEST_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy kaiten:8080
+}

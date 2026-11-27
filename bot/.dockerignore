@@ -1,6 +1,6 @@
-*
-!Dockerfile
-!bot.mjs
-!protocol.mjs
-!telegram.mjs
-!package.json
+.env*
+__pycache__
+test
+data
+*.sqlite*
+*.key

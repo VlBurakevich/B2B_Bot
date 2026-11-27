@@ -31,7 +31,7 @@ export async function readBody(req){
 export function bridgeClient(origin,key,{fetcher=fetch,allowLocal=false}={}){
  validateOrigin(origin,{allowLocal});validateKey(key);
  return async(path,payload)=>{
-  if(!['/bridge/code','/bridge/health','/api/telegram-bridge/contact'].includes(path))throw Error('Unsupported bridge path');
+  if(!['/bridge/code','/bridge/health','/api/telegram-bridge/contact','/api/telegram-bridge/message','/bridge/notify'].includes(path))throw Error('Unsupported bridge path');
   const body=JSON.stringify(payload);
   try{
    const r=await fetcher(origin+path,{method:'POST',redirect:'error',headers:signedHeaders(key,path,body),body,signal:AbortSignal.timeout(15000)});

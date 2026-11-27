@@ -1,0 +1,10 @@
+{
+  "accounts.mjs": "34b6ed8e3ece8152274477300fac7039ee5b1a6563601e558a8f0a926322d58c",
+  "server.mjs": "e7514c23a2f6d1e41e1093286adca8024cb74f3da2b3212e8b4f90489581710d",
+  "telegram-auth.mjs": "e016f4e6abdb2b9a48b84c294ce63c4a4f96dcf7725420991a2a8acfc327bd40",
+  "telegram-bridge.mjs": "e8bd77efa992365fc83c25a9773be77e410fe332cd0951faddd5f771c78b4991",
+  "bot-bridge-protocol.mjs": "2de3e5f140b2ebbccb7f15904a5f244590698cd0b93c3e4b6f27c34594559c29",
+  "public/app.js": "d8433eb35ba7e827d4463f8b404654e068e721ea6ef1109dc6c5a7becb46cbe2",
+  "public/index.html": "590435d0de913475f93d72f8c419c82be30fd4837630daea104afeba16a2b2e8",
+  "public/style.css": "a545718c92e0446074d4491801e2b99ca18ccab879978fad614cfc4b67e627cc"
+}

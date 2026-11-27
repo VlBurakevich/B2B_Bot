@@ -6,16 +6,13 @@ import {fileURLToPath} from 'node:url';
 import {authenticate,setupNonces,readBody,bridgeClient,validateKey,validateOrigin} from './protocol.mjs';
 import {telegramClient} from './telegram.mjs';
 
-const keyboard={keyboard:[[{text:'Поделиться своим номером',request_contact:true}]],resize_keyboard:true,one_time_keyboard:true};
 export async function handleMessage(api,b2b,m,b2bOrigin){
  if(!m||m.chat?.type!=='private'||!Number.isSafeInteger(m.from?.id)||m.from.is_bot||m.chat.id!==m.from.id)return;
- if(m.contact){
-  if(m.contact.user_id!==m.from.id){await api('sendMessage',{chat_id:m.chat.id,text:'Нужен ваш собственный контакт. Нажмите кнопку «Поделиться своим номером».',reply_markup:keyboard});return;}
-  const result=await b2b('/api/telegram-bridge/contact',{message:{chat:{id:m.chat.id,type:'private'},from:{id:m.from.id,is_bot:false},contact:{user_id:m.contact.user_id,phone_number:m.contact.phone_number}}});
-  await api('sendMessage',{chat_id:m.chat.id,text:result.bound?`Номер подтверждён. Откройте ${b2bOrigin}, введите телефон и запросите код входа.`:'Этот номер не удалось привязать. Проверьте, что руководитель добавил ваш номер к аккаунту B2B. Если телефон уже был привязан к другому Telegram, обратитесь к руководителю.',reply_markup:result.bound?{remove_keyboard:true}:keyboard});
- }else if(/^\/(start|help)(?:\s|$)/.test(m.text??'')){
-  await api('sendMessage',{chat_id:m.chat.id,text:`Вход в B2B «Наша смена»\n\n1. Подтвердите свой номер кнопкой ниже\n2. Откройте ${b2bOrigin}\n3. Введите телефон и запросите код\n\nДоступ — только сотрудникам с аккаунтом B2B. Код действует 5 минут. Никому его не сообщайте.`,reply_markup:keyboard});
- }
+ if(!Number.isSafeInteger(m.message_id))return;
+ if(m.contact&&m.contact.user_id!==m.from.id){await api('sendMessage',{chat_id:m.chat.id,text:'Нужен ваш собственный контакт.',reply_markup:{keyboard:[[{text:'Отправить мой номер',request_contact:true}]],resize_keyboard:true}});return;}
+ const message={message_id:m.message_id,chat:{id:m.chat.id,type:'private'},from:{id:m.from.id,is_bot:false,username:m.from.username},...(m.contact?{contact:{user_id:m.contact.user_id,phone_number:m.contact.phone_number}}:{}),...(typeof m.text==='string'?{text:m.text.slice(0,1000)}:{})};
+ const result=await b2b('/api/telegram-bridge/message',{eventId:String(m.from.id)+':'+m.message_id,message});
+ await api('sendMessage',{chat_id:m.chat.id,text:result.text,reply_markup:result.reply_markup});
 }
 export function openBotStore(dir){
  mkdirSync(dir,{recursive:true,mode:0o700});const file=join(dir,'bot-state.sqlite'),db=new DatabaseSync(file);chmodSync(file,0o600);
@@ -26,13 +23,21 @@ export function createBotServer({db,key,api,ready=()=>true}){
  const server=createServer(async(req,res)=>{
   const reply=(s,p)=>{res.writeHead(s,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(p));};
   try{
-   if(req.method!=='POST'||!['/bridge/code','/bridge/health'].includes(req.url))return reply(404,{error:'Not found'});
+   if(req.method!=='POST'||!['/bridge/code','/bridge/health','/bridge/notify'].includes(req.url))return reply(404,{error:'Not found'});
    const raw=await readBody(req);authenticate(db,key,req.url,raw,req.headers);
    if(!ready())return reply(503,{error:'Bot not ready'});
-   if(req.url==='/bridge/health')return reply(200,{ok:true});
+   if(req.url==='/bridge/health')return reply(200,{ok:true,protocol:2,registration:true,otpSeconds:600});
    let b;try{b=JSON.parse(raw);}catch{return reply(400,{error:'Invalid JSON'});}
    const now=Date.now();
-   if(typeof b.chatId!=='string'||!/^\d{1,16}$/.test(b.chatId)||typeof b.code!=='string'||!/^\d{6}$/.test(b.code)||typeof b.requestId!=='string'||!/^[a-f0-9]{64}$/.test(b.requestId)||!Number.isSafeInteger(b.expiresAt)||b.expiresAt<=now||b.expiresAt>now+305000)return reply(400,{error:'Invalid delivery'});
+   if(req.url==='/bridge/notify'){
+    if(typeof b.chatId!=='string'||!/^\d{1,16}$/.test(b.chatId)||typeof b.requestId!=='string'||!/^[-a-f0-9]{36}$/.test(b.requestId)||typeof b.text!=='string'||b.text.length>4000)return reply(400,{error:'Invalid notification'});
+    if(db.prepare("SELECT 1 FROM bot_delivery_ids WHERE id=? AND state='sent'").get(b.requestId))return reply(200,{ok:true});
+    // Retriable outbox: no lost notifications after temporary Telegram errors.
+    await api('sendMessage',{chat_id:b.chatId,text:b.text,reply_markup:b.reply_markup});
+    db.prepare("INSERT INTO bot_delivery_ids VALUES(?,?,'sent') ON CONFLICT(id) DO UPDATE SET state='sent'").run(b.requestId,now+30*86400000);
+    return reply(200,{ok:true});
+   }
+   if(typeof b.chatId!=='string'||!/^\d{1,16}$/.test(b.chatId)||typeof b.code!=='string'||!/^\d{6}$/.test(b.code)||typeof b.requestId!=='string'||!/^[a-f0-9]{64}$/.test(b.requestId)||!Number.isSafeInteger(b.expiresAt)||b.expiresAt<=now||b.expiresAt>now+605000)return reply(400,{error:'Invalid delivery'});
    db.prepare('DELETE FROM bot_delivery_ids WHERE expires_at<=?').run(now);
    // Claim before sending: identical signed retries never send a second code.
    const claim=db.prepare("INSERT OR IGNORE INTO bot_delivery_ids VALUES(?,?,'pending')").run(b.requestId,b.expiresAt);

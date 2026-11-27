@@ -1,0 +1,3 @@
+import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
+export function seal(value,key){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',Buffer.from(key,'hex'),iv);const bytes=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);return JSON.stringify({iv:iv.toString('hex'),tag:cipher.getAuthTag().toString('hex'),bytes:bytes.toString('hex')});}
+export function unseal(value,key){const p=JSON.parse(value),cipher=createDecipheriv('aes-256-gcm',Buffer.from(key,'hex'),Buffer.from(p.iv,'hex'));cipher.setAuthTag(Buffer.from(p.tag,'hex'));return JSON.parse(Buffer.concat([cipher.update(Buffer.from(p.bytes,'hex')),cipher.final()]).toString('utf8'));}

@@ -1,5 +1,5 @@
 {$BOT_DOMAIN} {
-    @bridge path /bridge/code /bridge/health
+    @bridge path /bridge/code /bridge/health /bridge/notify
     handle @bridge {
         reverse_proxy bot:3103
     }

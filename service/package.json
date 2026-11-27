@@ -1,0 +1,1 @@
+{"name":"b2b-control","version":"1.0.0","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"start":"node server.mjs","local":"node local.mjs","test":"node --test test/*.test.mjs"}}

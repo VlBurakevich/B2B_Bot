@@ -1,0 +1,15 @@
+Обновить только отдельный сервер Telegram-бота.
+
+Использовать bot/bot.mjs, bot/protocol.mjs, bot/telegram.mjs и Caddyfile из архива.
+Сохранить действующие .env, bot/.env, токен, BRIDGE_KEY и Docker volumes.
+Не создавать второго одновременно работающего бота с тем же токеном.
+В прежнем каталоге Docker Compose выполнить:
+  docker compose up -d --build bot
+  docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+
+/bridge/health после проверки подписи должен возвращать:
+  {"ok":true,"protocol":2,"registration":true,"otpSeconds":600}
+Caddy должен пропускать также /bridge/notify.
+
+После обновления сообщить Владиславу, что бот обновлён. B2B на Beget будет установлен отдельно — пользователь уже разрешил эту установку. Файлы service/ и install-b2b.py в архиве предназначены для следующего этапа на сервере B2B; на сервер бота их разворачивать не нужно.
+До обновления B2B новый бот не сможет завершать регистрацию: нужно согласованное короткое окно переключения двух приложений.

@@ -1,0 +1,75 @@
+import {DatabaseSync} from 'node:sqlite';
+import {mkdirSync,chmodSync} from 'node:fs';
+import {dirname} from 'node:path';
+import {withTiming,validTimestamp} from './public/timing.mjs';
+import {withQuality} from './public/quality.mjs';
+export function openStore(file){
+  mkdirSync(dirname(file),{recursive:true,mode:0o700});
+  const db=new DatabaseSync(file); chmodSync(file,0o600);
+  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+  db.exec(`CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,login TEXT UNIQUE NOT NULL,name TEXT NOT NULL,password_hash TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'active');
+    CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS auth_limits(key TEXT PRIMARY KEY,window INTEGER NOT NULL,count INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS leads(id INTEGER PRIMARY KEY,data TEXT NOT NULL,first_seen INTEGER NOT NULL,synced_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS comments(lead_id INTEGER PRIMARY KEY REFERENCES leads(id),body TEXT NOT NULL,version INTEGER NOT NULL,author TEXT NOT NULL,updated_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS comment_history(id INTEGER PRIMARY KEY,lead_id INTEGER NOT NULL REFERENCES leads(id),body TEXT NOT NULL,version INTEGER NOT NULL,author TEXT NOT NULL,updated_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS takeover_times(lead_id INTEGER PRIMARY KEY REFERENCES leads(id),minutes INTEGER CHECK(minutes IS NULL OR (minutes>=0 AND minutes<=599999)),version INTEGER NOT NULL,author TEXT NOT NULL,updated_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS lead_timing(lead_id INTEGER PRIMARY KEY REFERENCES leads(id),requested_at INTEGER,taken_at INTEGER,version INTEGER NOT NULL,author TEXT NOT NULL,updated_at INTEGER NOT NULL,CHECK(requested_at IS NULL OR taken_at IS NULL OR taken_at>=requested_at));
+    CREATE TABLE IF NOT EXISTS lead_flags(lead_id INTEGER NOT NULL REFERENCES leads(id),field TEXT NOT NULL CHECK(field IN ('dk','messenger')),value INTEGER CHECK(value IS NULL OR value IN (0,1)),version INTEGER NOT NULL,author TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(lead_id,field));
+    CREATE TABLE IF NOT EXISTS quality_flags(lead_id INTEGER NOT NULL REFERENCES leads(id),field TEXT NOT NULL CHECK(field IN ('notReturned','reasonCorrect')),value INTEGER CHECK(value IS NULL OR value IN (0,1)),version INTEGER NOT NULL,author TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(lead_id,field));
+    CREATE TABLE IF NOT EXISTS status_history(id INTEGER PRIMARY KEY,lead_id INTEGER NOT NULL REFERENCES leads(id),old_status TEXT,new_status TEXT NOT NULL,at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS comments_history_lead ON comment_history(lead_id,version);`);
+  const get=(key,fallback=null)=>{const row=db.prepare('SELECT value FROM meta WHERE key=?').get(key);return row?JSON.parse(row.value):fallback;};
+  const set=(key,value)=>db.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,JSON.stringify(value));
+  const transaction=fn=>{db.exec('BEGIN IMMEDIATE');try{const v=fn();db.exec('COMMIT');return v;}catch(e){db.exec('ROLLBACK');throw e;}};
+  const all=()=>db.prepare('SELECT l.*,rc.value AS reason_correct_value,rc.version AS reason_correct_version,rc.author AS reason_correct_author,rc.updated_at AS reason_correct_at,f.value AS not_returned_value,f.version AS not_returned_version,f.author AS not_returned_author,f.updated_at AS not_returned_at,q.requested_at AS timing_requested,q.taken_at AS timing_taken,q.version AS timing_version,q.author AS timing_author,q.updated_at AS timing_at,c.body AS comment,c.version AS comment_version,c.author AS comment_author,c.updated_at AS comment_at,t.minutes AS takeover_minutes,t.version AS takeover_version,t.author AS takeover_author,t.updated_at AS takeover_at,dk.value AS dk_value,dk.version AS dk_version,dk.author AS dk_author,dk.updated_at AS dk_at,m.value AS messenger_value,m.version AS messenger_version,m.author AS messenger_author,m.updated_at AS messenger_at FROM leads l LEFT JOIN quality_flags f ON f.lead_id=l.id AND f.field=\'notReturned\' LEFT JOIN quality_flags rc ON rc.lead_id=l.id AND rc.field=\'reasonCorrect\' LEFT JOIN lead_timing q ON q.lead_id=l.id LEFT JOIN comments c ON c.lead_id=l.id LEFT JOIN takeover_times t ON t.lead_id=l.id LEFT JOIN lead_flags dk ON dk.lead_id=l.id AND dk.field=\'dk\' LEFT JOIN lead_flags m ON m.lead_id=l.id AND m.field=\'messenger\' ORDER BY json_extract(l.data,\'$.createdAt\') DESC,l.id DESC').all().map(r=>withQuality(withTiming({...JSON.parse(r.data),reasonCorrect:r.reason_correct_value===null?null:Boolean(r.reason_correct_value),reasonCorrectVersion:r.reason_correct_version??0,reasonCorrectAuthor:r.reason_correct_author??'',reasonCorrectAt:r.reason_correct_at??null,notReturned:r.not_returned_value===null?null:Boolean(r.not_returned_value),notReturnedVersion:r.not_returned_version??0,notReturnedAuthor:r.not_returned_author??'',notReturnedAt:r.not_returned_at??null,firstSeen:r.first_seen,syncedAt:r.synced_at,comment:r.comment??'',commentVersion:r.comment_version??0,commentAuthor:r.comment_author??'',commentAt:r.comment_at??null,takeoverMinutes:r.takeover_minutes??null,takeoverVersion:r.takeover_version??0,takeoverAuthor:r.takeover_author??'',takeoverAt:r.takeover_at??null,dk:r.dk_value===null?null:Boolean(r.dk_value),dkVersion:r.dk_version??0,dkAuthor:r.dk_author??'',dkAt:r.dk_at??null,messenger:r.messenger_value===null?null:Boolean(r.messenger_value),messengerVersion:r.messenger_version??0,messengerAuthor:r.messenger_author??'',messengerAt:r.messenger_at??null},r.timing_version===null?null:{requested_at:r.timing_requested,taken_at:r.timing_taken,version:r.timing_version,author:r.timing_author,updated_at:r.timing_at})));
+  const saveLeads=(items,at)=>{for(const item of items){const old=db.prepare('SELECT data FROM leads WHERE id=?').get(item.id);const before=old?JSON.parse(old.data):null;
+    db.prepare('INSERT INTO leads(id,data,first_seen,synced_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,synced_at=excluded.synced_at').run(item.id,JSON.stringify(item),at,at);
+    if(!before||before.statusId!==item.statusId||before.pipelineId!==item.pipelineId)db.prepare('INSERT INTO status_history(lead_id,old_status,new_status,at) VALUES(?,?,?,?)').run(item.id,before?.status??null,item.status,at);
+  }};
+  const saveComment=(id,body,version,author)=>transaction(()=>{
+    if(!db.prepare('SELECT id FROM leads WHERE id=?').get(id))throw Object.assign(Error('Заявка не найдена.'),{status:404});
+    const current=db.prepare('SELECT version FROM comments WHERE lead_id=?').get(id);
+    if((current?.version??0)!==version)throw Object.assign(Error('Комментарий уже изменён другим пользователем. Обновите карточку перед сохранением.'),{status:409});
+    const updatedAt=Date.now(),next=version+1;
+    db.prepare('INSERT INTO comments(lead_id,body,version,author,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(lead_id) DO UPDATE SET body=excluded.body,version=excluded.version,author=excluded.author,updated_at=excluded.updated_at').run(id,body,next,author,updatedAt);
+    db.prepare('INSERT INTO comment_history(lead_id,body,version,author,updated_at) VALUES(?,?,?,?,?)').run(id,body,next,author,updatedAt);
+    return {comment:body,commentVersion:next,commentAuthor:author,commentAt:updatedAt};
+  });
+  const saveTakeoverTime=(id,minutes,version,author)=>transaction(()=>{
+    if(minutes!==null&&(!Number.isSafeInteger(minutes)||minutes<0||minutes>599999))throw Object.assign(Error('Укажите длительность в формате ЧЧ:ММ.'),{status:400});
+    if(!db.prepare('SELECT id FROM leads WHERE id=?').get(id))throw Object.assign(Error('Заявка не найдена.'),{status:404});
+    const current=db.prepare('SELECT version FROM takeover_times WHERE lead_id=?').get(id);
+    if((current?.version??0)!==version)throw Object.assign(Error('Время уже изменено. Обновите страницу и повторите ввод.'),{status:409});
+    const at=Date.now(),next=version+1;
+    db.prepare('INSERT INTO takeover_times(lead_id,minutes,version,author,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(lead_id) DO UPDATE SET minutes=excluded.minutes,version=excluded.version,author=excluded.author,updated_at=excluded.updated_at').run(id,minutes,next,author,at);
+    return {takeoverMinutes:minutes,takeoverVersion:next,takeoverAuthor:author,takeoverAt:at};
+  });
+  const saveLeadFlag=(id,field,value,version,author)=>transaction(()=>{
+    if(!['dk','messenger','notReturned','reasonCorrect'].includes(field)||(value!==null&&typeof value!=='boolean')||!Number.isSafeInteger(version)||version<0)throw Object.assign(Error('Выберите «Да» или «Нет».'),{status:400});
+    if(!db.prepare('SELECT id FROM leads WHERE id=?').get(id))throw Object.assign(Error('Заявка не найдена.'),{status:404});
+    const current=['notReturned','reasonCorrect'].includes(field)?db.prepare('SELECT version FROM quality_flags WHERE lead_id=? AND field=?').get(id,field):db.prepare('SELECT version FROM lead_flags WHERE lead_id=? AND field=?').get(id,field);
+    if((current?.version??0)!==version)throw Object.assign(Error('Значение уже изменено. Обновите страницу и повторите выбор.'),{status:409});
+    const at=Date.now(),next=version+1;
+    if(['notReturned','reasonCorrect'].includes(field))db.prepare('INSERT INTO quality_flags(lead_id,field,value,version,author,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(lead_id,field) DO UPDATE SET value=excluded.value,version=excluded.version,author=excluded.author,updated_at=excluded.updated_at').run(id,field,value===null?null:Number(value),next,author,at);
+    else db.prepare('INSERT INTO lead_flags(lead_id,field,value,version,author,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(lead_id,field) DO UPDATE SET value=excluded.value,version=excluded.version,author=excluded.author,updated_at=excluded.updated_at').run(id,field,value===null?null:Number(value),next,author,at);
+    return {[field]:value,[field+'Version']:next,[field+'Author']:author,[field+'At']:at};
+  });
+  const saveLeadTimestamp=(id,field,timestamp,version,author)=>transaction(()=>{
+    if(!['requestedAt','takenAt'].includes(field)||!validTimestamp(timestamp)||!Number.isSafeInteger(version)||version<0)throw Object.assign(Error('Проверьте дату и время.'),{status:400});
+    const row=db.prepare('SELECT data FROM leads WHERE id=?').get(id);
+    if(!row)throw Object.assign(Error('Заявка не найдена.'),{status:404});
+    const current=db.prepare('SELECT * FROM lead_timing WHERE lead_id=?').get(id);
+    if((current?.version??0)!==version)throw Object.assign(Error('Время уже изменено. Обновите страницу и повторите ввод.'),{status:409});
+    const legacy=db.prepare('SELECT minutes FROM takeover_times WHERE lead_id=?').get(id);
+    const timing=withTiming({...JSON.parse(row.data),takeoverMinutes:legacy?.minutes??null},current);
+    timing[field]=timestamp;
+    if(timing.requestedAt!==null&&timing.takenAt!==null&&timing.takenAt<timing.requestedAt)throw Object.assign(Error('Время взятия в работу не может быть раньше времени заявки.'),{status:400});
+    const at=Date.now(),next=version+1;
+    db.prepare('INSERT INTO lead_timing(lead_id,requested_at,taken_at,version,author,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(lead_id) DO UPDATE SET requested_at=excluded.requested_at,taken_at=excluded.taken_at,version=excluded.version,author=excluded.author,updated_at=excluded.updated_at').run(id,timing.requestedAt,timing.takenAt,next,author,at);
+    const updated=withTiming(timing,{requested_at:timing.requestedAt,taken_at:timing.takenAt,version:next,author,updated_at:at});
+    return {requestedAt:updated.requestedAt,takenAt:updated.takenAt,timingVersion:next,timingAuthor:author,timingAt:at,takeoverMinutes:updated.takeoverMinutes};
+  });
+  return {db,get,set,transaction,all,saveLeads,saveComment,saveTakeoverTime,saveLeadFlag,saveLeadTimestamp};
+}

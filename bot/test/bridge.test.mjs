@@ -5,11 +5,11 @@ import {createServer} from 'node:http';
 import {signedHeaders,authenticate,setupNonces,bridgeClient,validateOrigin} from '../protocol.mjs';
 import {createBotServer,handleMessage,runPolling} from '../bot.mjs';
 import {telegramClient} from '../telegram.mjs';
-import {createRemoteBridge} from '../../b2b-patch/telegram-bridge.mjs';
-import {setupTelegram,assignPhone,createTelegramAuth} from '../../b2b-patch/telegram-auth.mjs';
+import {createRemoteBridge} from '../../service/telegram-bridge.mjs';
+import {setupTelegram,assignPhone,createTelegramAuth} from '../../service/telegram-auth.mjs';
 const key='ab'.repeat(32),phone='+79990000001',userId=101;
-function dbFixture(t){const db=new DatabaseSync(':memory:');db.exec("PRAGMA foreign_keys=ON; CREATE TABLE users(id TEXT PRIMARY KEY,login TEXT,name TEXT,password_hash TEXT,state TEXT); CREATE TABLE sessions(hash TEXT,user_id TEXT,expires_at INTEGER); CREATE TABLE bot_delivery_ids(id TEXT PRIMARY KEY,expires_at INTEGER,state TEXT);CREATE TABLE bot_meta(key TEXT PRIMARY KEY,value TEXT);");setupNonces(db);setupTelegram(db);db.prepare('INSERT INTO users VALUES(?,?,?,?,?)').run('u1','fixture','Fixture','hash','active');t.after(()=>db.close());return db;}
-const contact=()=>({chat:{id:userId,type:'private'},from:{id:userId,is_bot:false},contact:{user_id:userId,phone_number:phone}});
+function dbFixture(t){const db=new DatabaseSync(':memory:');db.exec("PRAGMA foreign_keys=ON; CREATE TABLE users(id TEXT PRIMARY KEY,login TEXT,name TEXT,password_hash TEXT,state TEXT); CREATE TABLE sessions(hash TEXT,user_id TEXT,expires_at INTEGER); CREATE TABLE bot_delivery_ids(id TEXT PRIMARY KEY,expires_at INTEGER,state TEXT);CREATE TABLE bot_meta(key TEXT PRIMARY KEY,value TEXT);");setupNonces(db);setupTelegram(db);db.exec("CREATE TABLE access_permissions(user_id TEXT,permission TEXT); INSERT INTO access_permissions VALUES('u1','platform.full_access');");db.prepare('INSERT INTO users VALUES(?,?,?,?,?)').run('u1','fixture','Fixture','hash','active');t.after(()=>db.close());return db;}
+const contact=()=>({message_id:1,chat:{id:userId,type:'private'},from:{id:userId,is_bot:false},contact:{user_id:userId,phone_number:phone}});
 async function listen(t,server){await new Promise((r,j)=>{server.once('error',j);server.listen(0,'127.0.0.1',r);});t.after(()=>new Promise(r=>server.close(r)));return 'http://127.0.0.1:'+server.address().port;}
 const lower=h=>Object.fromEntries(Object.entries(h).map(([k,v])=>[k.toLowerCase(),v]));
 test('signature enforces key, exact path, exact body, clock and replay protection',t=>{
@@ -24,7 +24,7 @@ test('bridge client permits HTTPS only and will not follow redirects',async()=>{
  await assert.rejects(rpc('/bridge/health',{}),e=>e.message==='Bot bridge unavailable');assert.equal(seen.redirect,'error');
 });
 test('contact must belong to sender; private-only processing and help keyboard',async()=>{
- const calls=[],api=async(m,p)=>{calls.push(p);},b2b=async()=>{throw Error('must not run');};
+ const calls=[],api=async(m,p)=>{calls.push(p);},b2b=async(path,payload)=>{assert.equal(path,'/api/telegram-bridge/message');return {text:'Подтвердите номер',reply_markup:{keyboard:[[{text:'Отправить мой номер',request_contact:true}]]}};};
  await handleMessage(api,b2b,{...contact(),chat:{id:userId,type:'group'}},'https://b2b.example.org');assert.equal(calls.length,0);
  await handleMessage(api,b2b,{...contact(),contact:{...contact().contact,user_id:102}},'https://b2b.example.org');assert.equal(calls.length,1);
  await handleMessage(api,b2b,{...contact(),contact:undefined,text:'/start'},'https://b2b.example.org');assert.equal(calls[1].reply_markup.keyboard[0][0].request_contact,true);
@@ -38,7 +38,7 @@ test('remote bot binds a preassigned user and delivers a real B2B challenge via 
  const bound=await rpc('/api/telegram-bridge/contact',{message:contact()});assert.equal(bound.bound,true);
  const auth=createTelegramAuth(db,{key:'different-otp-hmac-secret-for-synthetic-test',send:bridge.send});
  const request=await auth.request(phone,'fixture');assert.equal(messages.length,1);const code=messages[0].text.match(/: (\d{6})/)[1];
- assert.equal(auth.verify({challenge:request.challenge,code},'fixture'),'u1');assert.throws(()=>auth.verify({challenge:request.challenge,code},'fixture'));
+ assert.equal(auth.verify({phone,code},'fixture'),'u1');assert.throws(()=>auth.verify({phone,code},'fixture'));
  const row=botDb.prepare('SELECT * FROM bot_delivery_ids').get();assert.deepEqual(Object.keys(row).sort(),['expires_at','id','state']);assert.equal(row.state,'sent');
 });
 test('unsigned contact RPC cannot bind an account',async t=>{
@@ -59,7 +59,7 @@ test('delivery outage invalidates B2B challenge instead of granting access',asyn
  const db=dbFixture(t),botDb=dbFixture(t);assignPhone(db,'u1',phone);db.prepare("UPDATE telegram_members SET telegram_id='101'").run();
  const botUrl=await listen(t,createBotServer({db:botDb,key,api:async()=>{throw Error('offline');}}));const bridge=createRemoteBridge(db,{bridgeKey:key,botOrigin:botUrl,allowLocal:true});
  const auth=createTelegramAuth(db,{key:'synthetic-hmac-secret-with-32-characters',send:bridge.send}),r=await auth.request(phone,'fixture');
- assert.equal(db.prepare('SELECT count(*) n FROM telegram_challenges').get().n,0);assert.throws(()=>auth.verify({challenge:r.challenge,code:'123456'},'fixture'));
+ assert.equal(db.prepare('SELECT count(*) n FROM telegram_challenges').get().n,0);assert.throws(()=>auth.verify({phone,code:'123456'},'fixture'));
 });
 test('Telegram transport refuses redirects and hides token in errors',async()=>{
  let seen;const api=telegramClient('123456:synthetic_token_not_real_12345',{fetcher:async(u,o)=>{seen=o;throw Error(u);}});
@@ -69,5 +69,5 @@ test('polling persists offset after success and skips permanently blocked chat',
  const db=dbFixture(t);let stop=false;const api=async(m,p)=>{
   if(m==='getUpdates'){if(p.offset===10){stop=true;return [];}return [{update_id:9,message:{...contact(),contact:undefined,text:'/start'}}];}
   throw Object.assign(Error('blocked'),{telegramCode:403});
- };await runPolling({db,api,b2b:()=>{},b2bOrigin:'https://example.org',stop:()=>stop});assert.equal(db.prepare("SELECT value FROM bot_meta WHERE key='offset'").get().value,'10');
+ };await runPolling({db,api,b2b:async()=>({text:'test'}),b2bOrigin:'https://example.org',stop:()=>stop});assert.equal(db.prepare("SELECT value FROM bot_meta WHERE key='offset'").get().value,'10');
 });

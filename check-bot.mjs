@@ -1,0 +1,3 @@
+import {bridgeClient} from './bot/protocol.mjs';
+const origin=process.env.B2B_TELEGRAM_BOT_ORIGIN??process.env.BOT_ORIGIN,key=process.env.B2B_TELEGRAM_BRIDGE_KEY??process.env.BRIDGE_KEY;
+try{const health=await bridgeClient(origin,key)('/bridge/health',{});const ready=health.ok===true&&health.protocol>=2&&health.registration===true&&health.otpSeconds===600;console.log(JSON.stringify({reachable:health.ok===true,registrationReady:ready,protocol:health.protocol??1}));if(!ready)process.exitCode=2;}catch{console.error('Bot health check failed; verify HTTPS, bridge key and server availability.');process.exitCode=1;}
